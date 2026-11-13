@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
+#import <MapKit/MapKit.h>
+#import <math.h>
 
 // The target IPA is version 3.3.3, bundle com.nari.digitalAttendance.
 // Settings are edited in the injected overlay and take effect immediately.
@@ -52,6 +54,32 @@ static NSString *EDTOldDeviceID(void) {
     return [value isKindOfClass:[NSString class]] && [value length] > 0 ? value : nil;
 }
 
+static BOOL EDTParseCoordinate(NSString *text, double minimum, double maximum, double *result) {
+    if (![text isKindOfClass:[NSString class]] || text.length == 0) return NO;
+    NSScanner *scanner = [NSScanner scannerWithString:text];
+    double value = 0;
+    if (![scanner scanDouble:&value] || !scanner.isAtEnd || !isfinite(value) ||
+        value < minimum || value > maximum) return NO;
+    *result = value;
+    return YES;
+}
+
+static BOOL EDTTestCoordinate(CLLocationCoordinate2D *result) {
+    double latitude, longitude;
+    if (!EDTEnabled(@"location_override") || !EDTEnabled(@"custom_location_enabled") ||
+        !EDTParseCoordinate(EDTGetPref(@"test_latitude"), -90, 90, &latitude) ||
+        !EDTParseCoordinate(EDTGetPref(@"test_longitude"), -180, 180, &longitude)) return NO;
+    *result = CLLocationCoordinate2DMake(latitude, longitude);
+    return YES;
+}
+
+static CLLocation *EDTTestLocation(void) {
+    CLLocationCoordinate2D coordinate;
+    if (!EDTTestCoordinate(&coordinate)) return nil;
+    return [[CLLocation alloc] initWithCoordinate:coordinate altitude:0
+                               horizontalAccuracy:5 verticalAccuracy:5 timestamp:[NSDate date]];
+}
+
 static NSString *EDTDisplayValue(id value) {
     if (!value || value == [NSNull null]) return @"（空）";
     NSString *result = [value description];
@@ -88,11 +116,18 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
 @property (nonatomic, strong) UIScrollView *panel;
 @property (nonatomic, strong) UISwitch *vpnSwitch;
 @property (nonatomic, strong) UISwitch *locationSwitch;
+@property (nonatomic, strong) UISwitch *customLocationSwitch;
+@property (nonatomic, strong) UISwitch *directLocationSwitch;
 @property (nonatomic, strong) UISwitch *deviceSwitch;
 @property (nonatomic, strong) UISwitch *idfvSwitch;
 @property (nonatomic, strong) UISegmentedControl *vpnMode;
 @property (nonatomic, strong) UITextField *deviceField;
 @property (nonatomic, strong) UITextField *idfvField;
+@property (nonatomic, strong) UITextField *latitudeField;
+@property (nonatomic, strong) UITextField *longitudeField;
+@property (nonatomic, strong) UIView *mapContainer;
+@property (nonatomic, strong) MKMapView *mapView;
+@property (nonatomic, strong) MKPointAnnotation *mapPin;
 @property (nonatomic, strong) UILabel *deviceRawLabel;
 @property (nonatomic, strong) UILabel *deviceReturnedLabel;
 @property (nonatomic, strong) UILabel *idfvRawLabel;
@@ -148,28 +183,40 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
     [self.panel addSubview:self.vpnMode];
 
     self.locationSwitch = [self addSwitch:@"虚拟定位检测改写" key:@"location_override" y:140];
-    self.deviceSwitch = [self addSwitch:@"旧设备 ID 替换" key:@"device_id_override" y:190];
-    self.deviceField = [self addField:@"填写已授权旧设备 ID" key:@"authorized_device_id" y:232];
-    self.deviceRawLabel = [self addValueLabelAtY:274];
-    self.deviceReturnedLabel = [self addValueLabelAtY:297];
-    self.idfvSwitch = [self addSwitch:@"IDFV 替换" key:@"idfv_override" y:329];
-    self.idfvField = [self addField:@"填写已授权 IDFV UUID" key:@"authorized_idfv" y:371];
-    self.idfvRawLabel = [self addValueLabelAtY:413];
-    self.idfvReturnedLabel = [self addValueLabelAtY:436];
+    self.customLocationSwitch = [self addSwitch:@"使用指定经纬度" key:@"custom_location_enabled" y:185];
+    self.latitudeField = [self addField:@"纬度（-90 到 90）" key:@"test_latitude" y:225];
+    self.longitudeField = [self addField:@"经度（-180 到 180）" key:@"test_longitude" y:268];
+    self.latitudeField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+    self.longitudeField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+    UIButton *pickOnMap = [UIButton buttonWithType:UIButtonTypeSystem];
+    pickOnMap.frame = CGRectMake(14, 310, 292, 34);
+    [pickOnMap setTitle:@"地图选点" forState:UIControlStateNormal];
+    [pickOnMap addTarget:self action:@selector(showMapPicker) forControlEvents:UIControlEventTouchUpInside];
+    [self.panel addSubview:pickOnMap];
+    self.directLocationSwitch = [self addSwitch:@"直接返回测试位置" key:@"direct_location_delivery" y:350];
+
+    self.deviceSwitch = [self addSwitch:@"旧设备 ID 替换" key:@"device_id_override" y:405];
+    self.deviceField = [self addField:@"填写已授权旧设备 ID" key:@"authorized_device_id" y:447];
+    self.deviceRawLabel = [self addValueLabelAtY:489];
+    self.deviceReturnedLabel = [self addValueLabelAtY:512];
+    self.idfvSwitch = [self addSwitch:@"IDFV 替换" key:@"idfv_override" y:544];
+    self.idfvField = [self addField:@"填写已授权 IDFV UUID" key:@"authorized_idfv" y:586];
+    self.idfvRawLabel = [self addValueLabelAtY:628];
+    self.idfvReturnedLabel = [self addValueLabelAtY:651];
 
     UIButton *refresh = [UIButton buttonWithType:UIButtonTypeSystem];
-    refresh.frame = CGRectMake(14, 468, 292, 35);
+    refresh.frame = CGRectMake(14, 683, 292, 35);
     [refresh setTitle:@"刷新当前读取值" forState:UIControlStateNormal];
     [refresh addTarget:self action:@selector(refreshIdentifiers) forControlEvents:UIControlEventTouchUpInside];
     [self.panel addSubview:refresh];
 
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 507, 292, 42)];
+    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 722, 292, 42)];
     self.statusLabel.font = [UIFont systemFontOfSize:12];
     self.statusLabel.textColor = UIColor.darkGrayColor;
     self.statusLabel.numberOfLines = 2;
     self.statusLabel.text = @"保存后重新发起登录或定位测试。";
     [self.panel addSubview:self.statusLabel];
-    self.panel.contentSize = CGSizeMake(320, 559);
+    self.panel.contentSize = CGSizeMake(320, 774);
     [self refreshIdentifiers];
 }
 
@@ -222,6 +269,93 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
     }
 }
 
+- (void)showMapPicker {
+    [self.view endEditing:YES];
+    if (!self.mapContainer) {
+        self.mapContainer = [[UIView alloc] initWithFrame:CGRectZero];
+        self.mapContainer.backgroundColor = UIColor.whiteColor;
+        self.mapContainer.layer.cornerRadius = 14;
+        self.mapContainer.layer.masksToBounds = YES;
+        UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(12, 5, 290, 35)];
+        title.text = @"轻点地图选择测试坐标";
+        title.font = [UIFont boldSystemFontOfSize:16];
+        title.tag = 101;
+        [self.mapContainer addSubview:title];
+        self.mapView = [[MKMapView alloc] initWithFrame:CGRectZero];
+        self.mapView.showsUserLocation = NO;
+        self.mapView.tag = 102;
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(mapTapped:)];
+        tap.cancelsTouchesInView = NO;
+        [self.mapView addGestureRecognizer:tap];
+        [self.mapContainer addSubview:self.mapView];
+        UIButton *cancel = [UIButton buttonWithType:UIButtonTypeSystem];
+        [cancel setTitle:@"取消" forState:UIControlStateNormal];
+        [cancel addTarget:self action:@selector(hideMapPicker) forControlEvents:UIControlEventTouchUpInside];
+        cancel.tag = 103;
+        [self.mapContainer addSubview:cancel];
+        UIButton *confirm = [UIButton buttonWithType:UIButtonTypeSystem];
+        [confirm setTitle:@"使用此位置" forState:UIControlStateNormal];
+        [confirm addTarget:self action:@selector(confirmMapPicker) forControlEvents:UIControlEventTouchUpInside];
+        confirm.tag = 104;
+        [self.mapContainer addSubview:confirm];
+        [self.view addSubview:self.mapContainer];
+    }
+    [self positionMapPicker];
+    double latitude = 39.9042, longitude = 116.4074;
+    EDTParseCoordinate(self.latitudeField.text, -90, 90, &latitude);
+    EDTParseCoordinate(self.longitudeField.text, -180, 180, &longitude);
+    CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(latitude, longitude);
+    [self.mapView setRegion:MKCoordinateRegionMakeWithDistance(coordinate, 2500, 2500) animated:NO];
+    if (!self.mapPin) {
+        self.mapPin = [MKPointAnnotation new];
+        [self.mapView addAnnotation:self.mapPin];
+    }
+    self.mapPin.coordinate = coordinate;
+    self.mapContainer.hidden = NO;
+    [self.view bringSubviewToFront:self.mapContainer];
+}
+
+- (void)positionMapPicker {
+    if (!self.mapContainer) return;
+    CGRect bounds = self.view.bounds;
+    CGFloat width = MIN(360, bounds.size.width - 20);
+    CGFloat height = MIN(480, bounds.size.height - 100);
+    self.mapContainer.frame = CGRectMake((bounds.size.width - width) / 2,
+                                         (bounds.size.height - height) / 2, width, height);
+    [self.mapContainer viewWithTag:101].frame = CGRectMake(12, 5, width - 24, 35);
+    self.mapView.frame = CGRectMake(8, 42, width - 16, height - 94);
+    [self.mapContainer viewWithTag:103].frame = CGRectMake(12, height - 48, 105, 40);
+    [self.mapContainer viewWithTag:104].frame = CGRectMake(width - 145, height - 48, 133, 40);
+}
+
+- (void)mapTapped:(UITapGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateEnded) return;
+    CGPoint point = [gesture locationInView:self.mapView];
+    self.mapPin.coordinate = [self.mapView convertPoint:point toCoordinateFromView:self.mapView];
+}
+
+- (void)hideMapPicker {
+    self.mapContainer.hidden = YES;
+}
+
+- (void)confirmMapPicker {
+    CLLocationCoordinate2D coordinate = self.mapPin.coordinate;
+    NSString *latitude = [NSString stringWithFormat:@"%.8f", coordinate.latitude];
+    NSString *longitude = [NSString stringWithFormat:@"%.8f", coordinate.longitude];
+    BOOL saved = EDTSetPref(@"test_latitude", latitude) &&
+                 EDTSetPref(@"test_longitude", longitude) &&
+                 EDTSetPref(@"custom_location_enabled", @YES);
+    if (saved) {
+        self.latitudeField.text = latitude;
+        self.longitudeField.text = longitude;
+        self.customLocationSwitch.on = YES;
+        self.statusLabel.text = @"坐标已保存；请重新发起定位测试。";
+        [self hideMapPicker];
+    } else {
+        self.statusLabel.text = @"坐标保存失败，请检查应用存储空间。";
+    }
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     if (CGRectEqualToRect(self.bubble.frame, CGRectZero)) return;
@@ -233,6 +367,7 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
     }
     self.bubble.center = center;
     [self positionPanel];
+    [self positionMapPicker];
 }
 
 - (void)positionPanel {
@@ -259,6 +394,7 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
         [self positionPanel];
         [self refreshIdentifiers];
     } else {
+        [self hideMapPicker];
         [gPreviousKeyWindow makeKeyWindow];
     }
 }
@@ -292,6 +428,16 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
 
 - (void)textFieldDidEndEditing:(UITextField *)field {
     NSString *value = [field.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if ([field.accessibilityIdentifier isEqualToString:@"test_latitude"] ||
+        [field.accessibilityIdentifier isEqualToString:@"test_longitude"]) {
+        double parsed;
+        double minimum = [field.accessibilityIdentifier isEqualToString:@"test_latitude"] ? -90 : -180;
+        double maximum = -minimum;
+        if (value.length > 0 && !EDTParseCoordinate(value, minimum, maximum, &parsed)) {
+            self.statusLabel.text = @"经纬度格式或范围不正确。";
+            return;
+        }
+    }
     if ([field.accessibilityIdentifier isEqualToString:@"authorized_idfv"] &&
         value.length > 0 && ![[NSUUID alloc] initWithUUIDString:value]) {
         self.statusLabel.text = @"IDFV 格式错误：需要有效 UUID。";
@@ -340,6 +486,55 @@ static void EDTShowOverlay(void) {
         }
     }
     return %orig;
+}
+
+%end
+
+static BOOL EDTShouldDirectLocation(void) {
+    CLLocationCoordinate2D coordinate;
+    return EDTEnabled(@"direct_location_delivery") && EDTTestCoordinate(&coordinate);
+}
+
+static void EDTDeliverLocation(CLLocationManager *manager) {
+    CLLocation *location = EDTTestLocation();
+    if (!location) return;
+    __weak CLLocationManager *weakManager = manager;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        CLLocationManager *strongManager = weakManager;
+        id<CLLocationManagerDelegate> delegate = strongManager.delegate;
+        if (strongManager && [delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+            [delegate locationManager:strongManager didUpdateLocations:@[location]];
+            NSLog(@"[EDTProbe] delivered direct test location");
+        }
+    });
+}
+
+%hook CLLocation
+
+- (CLLocationCoordinate2D)coordinate {
+    CLLocationCoordinate2D coordinate;
+    if (EDTTestCoordinate(&coordinate)) return coordinate;
+    return %orig;
+}
+
+%end
+
+%hook CLLocationManager
+
+- (void)requestLocation {
+    if (EDTShouldDirectLocation()) {
+        EDTDeliverLocation(self);
+        return;
+    }
+    %orig;
+}
+
+- (void)startUpdatingLocation {
+    if (EDTShouldDirectLocation()) {
+        EDTDeliverLocation(self);
+        return;
+    }
+    %orig;
 }
 
 %end

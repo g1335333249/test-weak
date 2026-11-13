@@ -5,6 +5,10 @@
     <key>vpn_override</key><false/>
     <key>vpn_mode</key><string>online</string>
     <key>location_override</key><false/>
+    <key>custom_location_enabled</key><false/>
+    <key>direct_location_delivery</key><false/>
+    <key>test_latitude</key><string></string>
+    <key>test_longitude</key><string></string>
     <key>device_id_override</key><false/>
     <key>authorized_device_id</key><string></string>
     <key>idfv_override</key><false/>

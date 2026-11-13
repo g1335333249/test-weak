@@ -7,6 +7,6 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = EDTProbe
 EDTProbe_FILES = Tweak.xm
 EDTProbe_CFLAGS = -fobjc-arc
-EDTProbe_FRAMEWORKS = Foundation UIKit CoreLocation
+EDTProbe_FRAMEWORKS = Foundation UIKit CoreLocation MapKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
