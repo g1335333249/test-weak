@@ -16,7 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Theos
-        run: bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+        run: |
+          brew install ldid xz
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          xcrun --show-sdk-path --sdk iphoneos
       - name: Build rootless package
         run: |
           export THEOS="$HOME/theos"
