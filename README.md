@@ -10,7 +10,7 @@
 | `location_override` | 将 `CLLocationSourceInformation -isSimulatedBySoftware` 返回 `NO`，并关闭两个高德定位管理器的 `detectRiskOfFakeLocation` | IPA 含这些 selector 和管理器属性 |
 | `custom_location_enabled` | 在定位开关打开且经纬度有效时，让 `CLLocation -coordinate` 返回指定坐标 | 用于验证应用是否直接读取 Core Location 坐标 |
 | `direct_location_delivery` | 在上述条件下拦截 `CLLocationManager -requestLocation` 和 `-startUpdatingLocation`，直接向 delegate 回传测试位置 | 用于验证是否可跳过系统定位请求；尚未验证应用全部路径 |
-| `device_id_override` | 对 `NSUserDefaults` 读取 `E_DIAN_TONG_DEVICE_ID` 时返回配置的旧设备 ID | IPA 含此键；尚未确认登录请求一定从这里读取 |
+| `device_id_override` | 对 `NSUserDefaults` 读取 `E_DIAN_TONG_DEVICE_ID` 及带账号后缀的同名前缀键时返回配置的旧设备 ID，并保留原值的字符串或 `NSData` 类型 | 实际安装数据中发现带后缀的键与 UTF-8 `NSData` 值；尚未确认登录请求一定从这里读取 |
 | `idfv_override` | 用配置的 UUID 替换 `UIDevice -identifierForVendor` | 用于排查另一种设备标识路径，尚未确认应用使用它 |
 
 注入后，应用右侧会出现可拖动的“测试”悬浮按钮。点开后可设置 VPN、定位和设备标识开关；点面板标题即可折叠。定位区可输入经纬度，或打开地图轻点选点并确认。打开“虚拟定位检测改写”和“使用指定经纬度”后，坐标改写才生效；再打开“直接返回测试位置”，可测试跳过 Core Location 的系统请求。地图选点使用 MapKit，需有地图数据网络连接，坐标以地图返回值为准。
@@ -21,10 +21,12 @@
 
 | 面板字段 | “原始”值的读取方式 | 替换值如何取得 |
 | --- | --- | --- |
-| 旧设备 ID | 点击“刷新当前读取值”时，从**当前这台设备**的应用 `NSUserDefaults.standardUserDefaults` 读取键 `E_DIAN_TONG_DEVICE_ID`；hook 也记录应用通过 `objectForKey:` 或 `stringForKey:` 读取此键时的原值 | 在**已获准登录的旧设备**上安装同一测试 tweak，关闭“旧设备 ID 替换”，打开面板读取“原始”值，再手动填入新设备的输入框。若旧设备已无法读取，可从你控制的设备注册服务端或原应用数据中核对该 ID |
+| 旧设备 ID | 点击“刷新当前读取值”时，从**当前这台设备**的应用 `NSUserDefaults.standardUserDefaults` 读取 `E_DIAN_TONG_DEVICE_ID` 或其带账号后缀的键；实际样本中值为 UTF-8 编码的 `NSData`，面板会解码显示。hook 也记录应用通过 `objectForKey:` 或 `stringForKey:` 读取同一键时的原值 | 在**已获准登录的旧设备**上安装同一测试 tweak，关闭“旧设备 ID 替换”，打开面板读取“原始”值，再手动填入新设备的输入框。若旧设备已无法读取，可从你控制的设备注册服务端或原应用数据中核对该 ID |
 | IDFV | 调用**当前这台设备**的 `UIDevice.currentDevice.identifierForVendor`，记录改写前返回的 UUID | 在已获准登录的旧设备上用相同方式读取“原始” IDFV，再手动填入新设备 |
 
 “返回”显示开关和输入值生效后，当前 API 调用返回给应用的值。新设备面板无法凭空获取旧设备的值；旧设备 ID 显示“（空）”只表示当前读取的 `NSUserDefaults` 键没有值，不代表应用没有使用其他存储或服务端设备标识。IDFV 是 iOS 的供应商标识，和应用自定义的 `E_DIAN_TONG_DEVICE_ID` 不是同一字段。即使两项“返回”与输入值一致，也只能说明这些 hook 路径改写成功，不能据此判定服务端设备绑定已被绕过。
+
+已安装数据样本还含有带相同账号后缀的 `E_DIAN_TONG_LOGIN_INFO`，其 JSON 中有 `deviceId` 字段；样本里它与单独保存的设备 ID 相同。当前 tweak 未改写这份登录缓存，测试登录时需检查应用实际使用的字段。
 
 ## 构建与测试
 

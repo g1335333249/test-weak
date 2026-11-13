@@ -82,8 +82,25 @@ static CLLocation *EDTTestLocation(void) {
 
 static NSString *EDTDisplayValue(id value) {
     if (!value || value == [NSNull null]) return @"（空）";
+    if ([value isKindOfClass:[NSData class]]) {
+        NSString *decoded = [[NSString alloc] initWithData:value encoding:NSUTF8StringEncoding];
+        return decoded.length ? decoded : [NSString stringWithFormat:@"（二进制数据，%lu 字节）", (unsigned long)[value length]];
+    }
     NSString *result = [value description];
     return result.length ? result : @"（空）";
+}
+
+static BOOL EDTIsDeviceIDKey(NSString *key) {
+    return [key isKindOfClass:[NSString class]] && [key hasPrefix:@"E_DIAN_TONG_DEVICE_ID"];
+}
+
+static NSString *EDTCurrentDeviceIDKey(NSUserDefaults *defaults) {
+    NSDictionary *stored = [defaults dictionaryRepresentation];
+    if (stored[@"E_DIAN_TONG_DEVICE_ID"]) return @"E_DIAN_TONG_DEVICE_ID";
+    for (NSString *key in [[stored allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+        if (EDTIsDeviceIDKey(key)) return key;
+    }
+    return @"E_DIAN_TONG_DEVICE_ID";
 }
 
 static void EDTRecordDeviceID(id original, id returned) {
@@ -259,7 +276,8 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
 
 - (void)refreshIdentifiers {
     // Reading through the public APIs exercises the same hook path as the app.
-    (void)[[NSUserDefaults standardUserDefaults] objectForKey:@"E_DIAN_TONG_DEVICE_ID"];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    (void)[defaults objectForKey:EDTCurrentDeviceIDKey(defaults)];
     (void)[[UIDevice currentDevice] identifierForVendor];
     @synchronized ([NSUserDefaults class]) {
         self.deviceRawLabel.text = [@"原始：" stringByAppendingString:gRawDeviceID ?: @"（未读取）"];
@@ -580,10 +598,11 @@ static void EDTDeliverLocation(CLLocationManager *manager) {
 %hook NSUserDefaults
 
 - (id)objectForKey:(NSString *)key {
-    if (![key isEqualToString:@"E_DIAN_TONG_DEVICE_ID"]) return %orig;
+    if (!EDTIsDeviceIDKey(key)) return %orig;
     id original = %orig;
     NSString *oldID = EDTEnabled(@"device_id_override") ? EDTOldDeviceID() : nil;
-    id returned = oldID ?: original;
+    id returned = oldID ? ([original isKindOfClass:[NSData class]]
+                           ? [oldID dataUsingEncoding:NSUTF8StringEncoding] : oldID) : original;
     EDTRecordDeviceID(original, returned);
     if (oldID) {
         NSLog(@"[EDTProbe] supplied configured device ID through objectForKey:");
@@ -592,7 +611,7 @@ static void EDTDeliverLocation(CLLocationManager *manager) {
 }
 
 - (NSString *)stringForKey:(NSString *)key {
-    if (![key isEqualToString:@"E_DIAN_TONG_DEVICE_ID"]) return %orig;
+    if (!EDTIsDeviceIDKey(key)) return %orig;
     // dictionaryRepresentation bypasses our objectForKey: hook when stringForKey:
     // internally delegates to it.
     id raw = [self dictionaryRepresentation][key];
