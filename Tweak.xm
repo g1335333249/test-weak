@@ -7,6 +7,10 @@
 static NSDictionary *gPrefs;
 static UIWindow *gOverlayWindow;
 static __weak UIWindow *gPreviousKeyWindow;
+static NSString *gRawDeviceID;
+static NSString *gReturnedDeviceID;
+static NSString *gRawIDFV;
+static NSString *gReturnedIDFV;
 
 static NSString *EDTPrefsPath(void) {
     static NSString *path;
@@ -48,6 +52,26 @@ static NSString *EDTOldDeviceID(void) {
     return [value isKindOfClass:[NSString class]] && [value length] > 0 ? value : nil;
 }
 
+static NSString *EDTDisplayValue(id value) {
+    if (!value || value == [NSNull null]) return @"（空）";
+    NSString *result = [value description];
+    return result.length ? result : @"（空）";
+}
+
+static void EDTRecordDeviceID(id original, id returned) {
+    @synchronized ([NSUserDefaults class]) {
+        gRawDeviceID = EDTDisplayValue(original);
+        gReturnedDeviceID = EDTDisplayValue(returned);
+    }
+}
+
+static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
+    @synchronized ([NSUserDefaults class]) {
+        gRawIDFV = EDTDisplayValue(original.UUIDString);
+        gReturnedIDFV = EDTDisplayValue(returned.UUIDString);
+    }
+}
+
 @interface EDTOverlayWindow : UIWindow
 @end
 
@@ -69,6 +93,10 @@ static NSString *EDTOldDeviceID(void) {
 @property (nonatomic, strong) UISegmentedControl *vpnMode;
 @property (nonatomic, strong) UITextField *deviceField;
 @property (nonatomic, strong) UITextField *idfvField;
+@property (nonatomic, strong) UILabel *deviceRawLabel;
+@property (nonatomic, strong) UILabel *deviceReturnedLabel;
+@property (nonatomic, strong) UILabel *idfvRawLabel;
+@property (nonatomic, strong) UILabel *idfvReturnedLabel;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, assign) BOOL expanded;
 @end
@@ -122,16 +150,27 @@ static NSString *EDTOldDeviceID(void) {
     self.locationSwitch = [self addSwitch:@"虚拟定位检测改写" key:@"location_override" y:140];
     self.deviceSwitch = [self addSwitch:@"旧设备 ID 替换" key:@"device_id_override" y:190];
     self.deviceField = [self addField:@"填写已授权旧设备 ID" key:@"authorized_device_id" y:232];
-    self.idfvSwitch = [self addSwitch:@"IDFV 替换" key:@"idfv_override" y:282];
-    self.idfvField = [self addField:@"填写已授权 IDFV UUID" key:@"authorized_idfv" y:324];
+    self.deviceRawLabel = [self addValueLabelAtY:274];
+    self.deviceReturnedLabel = [self addValueLabelAtY:297];
+    self.idfvSwitch = [self addSwitch:@"IDFV 替换" key:@"idfv_override" y:329];
+    self.idfvField = [self addField:@"填写已授权 IDFV UUID" key:@"authorized_idfv" y:371];
+    self.idfvRawLabel = [self addValueLabelAtY:413];
+    self.idfvReturnedLabel = [self addValueLabelAtY:436];
 
-    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 369, 292, 42)];
+    UIButton *refresh = [UIButton buttonWithType:UIButtonTypeSystem];
+    refresh.frame = CGRectMake(14, 468, 292, 35);
+    [refresh setTitle:@"刷新当前读取值" forState:UIControlStateNormal];
+    [refresh addTarget:self action:@selector(refreshIdentifiers) forControlEvents:UIControlEventTouchUpInside];
+    [self.panel addSubview:refresh];
+
+    self.statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 507, 292, 42)];
     self.statusLabel.font = [UIFont systemFontOfSize:12];
     self.statusLabel.textColor = UIColor.darkGrayColor;
     self.statusLabel.numberOfLines = 2;
     self.statusLabel.text = @"保存后重新发起登录或定位测试。";
     [self.panel addSubview:self.statusLabel];
-    self.panel.contentSize = CGSizeMake(320, 421);
+    self.panel.contentSize = CGSizeMake(320, 559);
+    [self refreshIdentifiers];
 }
 
 - (UISwitch *)addSwitch:(NSString *)title key:(NSString *)key y:(CGFloat)y {
@@ -160,6 +199,27 @@ static NSString *EDTOldDeviceID(void) {
     field.delegate = self;
     [self.panel addSubview:field];
     return field;
+}
+
+- (UILabel *)addValueLabelAtY:(CGFloat)y {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(14, y, 292, 22)];
+    label.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    label.textColor = UIColor.darkGrayColor;
+    label.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    [self.panel addSubview:label];
+    return label;
+}
+
+- (void)refreshIdentifiers {
+    // Reading through the public APIs exercises the same hook path as the app.
+    (void)[[NSUserDefaults standardUserDefaults] objectForKey:@"E_DIAN_TONG_DEVICE_ID"];
+    (void)[[UIDevice currentDevice] identifierForVendor];
+    @synchronized ([NSUserDefaults class]) {
+        self.deviceRawLabel.text = [@"原始：" stringByAppendingString:gRawDeviceID ?: @"（未读取）"];
+        self.deviceReturnedLabel.text = [@"返回：" stringByAppendingString:gReturnedDeviceID ?: @"（未读取）"];
+        self.idfvRawLabel.text = [@"原始：" stringByAppendingString:gRawIDFV ?: @"（未读取）"];
+        self.idfvReturnedLabel.text = [@"返回：" stringByAppendingString:gReturnedIDFV ?: @"（未读取）"];
+    }
 }
 
 - (void)viewDidLayoutSubviews {
@@ -197,6 +257,7 @@ static NSString *EDTOldDeviceID(void) {
         }
         [self.view.window makeKeyWindow];
         [self positionPanel];
+        [self refreshIdentifiers];
     } else {
         [gPreviousKeyWindow makeKeyWindow];
     }
@@ -216,6 +277,7 @@ static NSString *EDTOldDeviceID(void) {
     BOOL saved = EDTSetPref(sender.accessibilityIdentifier, @(sender.on));
     self.statusLabel.text = saved ? @"已保存；请重新发起测试。" : @"保存失败：请检查应用存储空间。";
     if (!saved) sender.on = !sender.on;
+    [self refreshIdentifiers];
 }
 
 - (void)modeChanged:(UISegmentedControl *)sender {
@@ -237,6 +299,7 @@ static NSString *EDTOldDeviceID(void) {
     }
     BOOL saved = EDTSetPref(field.accessibilityIdentifier, value ?: @"");
     self.statusLabel.text = saved ? @"参数已保存；请重新发起测试。" : @"保存失败：请检查应用存储空间。";
+    [self refreshIdentifiers];
 }
 
 @end
@@ -322,25 +385,30 @@ static void EDTShowOverlay(void) {
 %hook NSUserDefaults
 
 - (id)objectForKey:(NSString *)key {
-    if (EDTEnabled(@"device_id_override") && [key isEqualToString:@"E_DIAN_TONG_DEVICE_ID"]) {
-        NSString *oldID = EDTOldDeviceID();
-        if (oldID) {
-            NSLog(@"[EDTProbe] supplied configured device ID through objectForKey:");
-            return oldID;
-        }
+    if (![key isEqualToString:@"E_DIAN_TONG_DEVICE_ID"]) return %orig;
+    id original = %orig;
+    NSString *oldID = EDTEnabled(@"device_id_override") ? EDTOldDeviceID() : nil;
+    id returned = oldID ?: original;
+    EDTRecordDeviceID(original, returned);
+    if (oldID) {
+        NSLog(@"[EDTProbe] supplied configured device ID through objectForKey:");
     }
-    return %orig;
+    return returned;
 }
 
 - (NSString *)stringForKey:(NSString *)key {
-    if (EDTEnabled(@"device_id_override") && [key isEqualToString:@"E_DIAN_TONG_DEVICE_ID"]) {
-        NSString *oldID = EDTOldDeviceID();
-        if (oldID) {
-            NSLog(@"[EDTProbe] supplied configured device ID through stringForKey:");
-            return oldID;
-        }
+    if (![key isEqualToString:@"E_DIAN_TONG_DEVICE_ID"]) return %orig;
+    // dictionaryRepresentation bypasses our objectForKey: hook when stringForKey:
+    // internally delegates to it.
+    id raw = [self dictionaryRepresentation][key];
+    NSString *original = %orig;
+    NSString *oldID = EDTEnabled(@"device_id_override") ? EDTOldDeviceID() : nil;
+    NSString *returned = oldID ?: original;
+    EDTRecordDeviceID(raw, returned);
+    if (oldID) {
+        NSLog(@"[EDTProbe] supplied configured device ID through stringForKey:");
     }
-    return %orig;
+    return returned;
 }
 
 %end
@@ -348,15 +416,18 @@ static void EDTShowOverlay(void) {
 %hook UIDevice
 
 - (NSUUID *)identifierForVendor {
+    NSUUID *original = %orig;
+    NSUUID *returned = original;
     if (EDTEnabled(@"idfv_override")) {
         NSString *value = EDTGetPref(@"authorized_idfv");
         NSUUID *uuid = [value isKindOfClass:[NSString class]] ? [[NSUUID alloc] initWithUUIDString:value] : nil;
         if (uuid) {
             NSLog(@"[EDTProbe] supplied configured identifierForVendor");
-            return uuid;
+            returned = uuid;
         }
     }
-    return %orig;
+    EDTRecordIDFV(original, returned);
+    return returned;
 }
 
 %end
