@@ -1,6 +1,6 @@
 Package: com.testipa.edtprobe
 Name: EDT Probe
-Version: 0.2.2
+Version: 0.3.0
 Architecture: iphoneos-arm64
 Description: Switchable attendance-app security test probes
 Maintainer: App Security Test

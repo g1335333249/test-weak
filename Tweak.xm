@@ -2,6 +2,8 @@
 #import <UIKit/UIKit.h>
 #import <CoreLocation/CoreLocation.h>
 #import <MapKit/MapKit.h>
+#import <WebKit/WebKit.h>
+#import <objc/runtime.h>
 #import <math.h>
 
 // The target IPA is version 3.3.3, bundle com.nari.digitalAttendance.
@@ -13,6 +15,8 @@ static NSString *gRawDeviceID;
 static NSString *gReturnedDeviceID;
 static NSString *gRawIDFV;
 static NSString *gReturnedIDFV;
+static NSMutableArray<NSString *> *gRequestLog;
+static NSString *const EDTLogChanged = @"EDTProbeLogChanged";
 
 static NSString *EDTPrefsPath(void) {
     static NSString *path;
@@ -47,6 +51,29 @@ static BOOL EDTSetPref(NSString *key, id value) {
 
 static BOOL EDTEnabled(NSString *key) {
     return [EDTGetPref(key) boolValue];
+}
+
+static BOOL EDTNetworkLoggingEnabled(void) {
+    id value = EDTGetPref(@"network_log_enabled");
+    return value ? [value boolValue] : YES;
+}
+
+static void EDTAppendRequestLog(NSString *line) {
+    if (!EDTNetworkLoggingEnabled() || !line.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!gRequestLog) gRequestLog = [NSMutableArray array];
+        NSString *stamp = [NSDateFormatter localizedStringFromDate:[NSDate date]
+                                                         dateStyle:NSDateFormatterNoStyle
+                                                         timeStyle:NSDateFormatterMediumStyle];
+        [gRequestLog addObject:[NSString stringWithFormat:@"%@ %@", stamp,
+                                line.length > 2200 ? [[line substringToIndex:2200] stringByAppendingString:@"…"] : line]];
+        while (gRequestLog.count > 60) [gRequestLog removeObjectAtIndex:0];
+        [[NSNotificationCenter defaultCenter] postNotificationName:EDTLogChanged object:nil];
+    });
+}
+
+static NSString *EDTRequestLogText(void) {
+    return gRequestLog.count ? [gRequestLog componentsJoinedByString:@"\n\n"] : @"等待考勤小程序请求…";
 }
 
 static NSString *EDTOldDeviceID(void) {
@@ -150,6 +177,7 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
 @property (nonatomic, strong) UILabel *idfvRawLabel;
 @property (nonatomic, strong) UILabel *idfvReturnedLabel;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UITextView *requestLogView;
 @property (nonatomic, assign) BOOL expanded;
 @end
 
@@ -233,8 +261,55 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
     self.statusLabel.numberOfLines = 2;
     self.statusLabel.text = @"保存后重新发起登录或定位测试。";
     [self.panel addSubview:self.statusLabel];
-    self.panel.contentSize = CGSizeMake(320, 774);
+    [self addSwitch:@"记录考勤请求/响应" key:@"network_log_enabled" y:772];
+    UILabel *logTitle = [[UILabel alloc] initWithFrame:CGRectMake(14, 812, 292, 24)];
+    logTitle.text = @"考勤小程序请求日志（最多 60 条）";
+    logTitle.font = [UIFont boldSystemFontOfSize:14];
+    [self.panel addSubview:logTitle];
+    self.requestLogView = [[UITextView alloc] initWithFrame:CGRectMake(14, 842, 292, 250)];
+    self.requestLogView.editable = NO;
+    self.requestLogView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    self.requestLogView.layer.borderWidth = 1;
+    self.requestLogView.layer.borderColor = [UIColor lightGrayColor].CGColor;
+    self.requestLogView.layer.cornerRadius = 6;
+    [self.panel addSubview:self.requestLogView];
+    UIButton *copyLog = [UIButton buttonWithType:UIButtonTypeSystem];
+    copyLog.frame = CGRectMake(14, 1100, 140, 34);
+    [copyLog setTitle:@"复制日志" forState:UIControlStateNormal];
+    [copyLog addTarget:self action:@selector(copyRequestLog) forControlEvents:UIControlEventTouchUpInside];
+    [self.panel addSubview:copyLog];
+    UIButton *clearLog = [UIButton buttonWithType:UIButtonTypeSystem];
+    clearLog.frame = CGRectMake(166, 1100, 140, 34);
+    [clearLog setTitle:@"清空日志" forState:UIControlStateNormal];
+    [clearLog addTarget:self action:@selector(clearRequestLog) forControlEvents:UIControlEventTouchUpInside];
+    [self.panel addSubview:clearLog];
+    self.panel.contentSize = CGSizeMake(320, 1144);
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshRequestLog)
+                                                 name:EDTLogChanged object:nil];
+    [self refreshRequestLog];
     [self refreshIdentifiers];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)refreshRequestLog {
+    self.requestLogView.text = EDTRequestLogText();
+    if (gRequestLog.count) {
+        NSRange end = NSMakeRange(self.requestLogView.text.length, 0);
+        [self.requestLogView scrollRangeToVisible:end];
+    }
+}
+
+- (void)copyRequestLog {
+    UIPasteboard.generalPasteboard.string = EDTRequestLogText();
+    self.statusLabel.text = @"日志已复制；分享前请检查敏感内容。";
+}
+
+- (void)clearRequestLog {
+    [gRequestLog removeAllObjects];
+    [self refreshRequestLog];
 }
 
 - (UISwitch *)addSwitch:(NSString *)title key:(NSString *)key y:(CGFloat)y {
@@ -243,7 +318,7 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
     label.font = [UIFont systemFontOfSize:15];
     [self.panel addSubview:label];
     UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectMake(250, y + 2, 51, 31)];
-    toggle.on = EDTEnabled(key);
+    toggle.on = [key isEqualToString:@"network_log_enabled"] ? EDTNetworkLoggingEnabled() : EDTEnabled(key);
     toggle.accessibilityIdentifier = key;
     [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
     [self.panel addSubview:toggle];
@@ -489,6 +564,69 @@ static void EDTShowOverlay(void) {
     NSLog(@"[EDTProbe] floating panel displayed");
 }
 
+@interface EDTWebLogHandler : NSObject <WKScriptMessageHandler>
+@end
+
+@implementation EDTWebLogHandler
+- (void)userContentController:(WKUserContentController *)controller didReceiveScriptMessage:(WKScriptMessage *)message {
+    if (![message.name isEqualToString:@"edtProbeLog"] || ![message.body isKindOfClass:[NSDictionary class]]) return;
+    NSDictionary *body = message.body;
+    NSString *path = body[@"path"];
+    NSString *phase = body[@"phase"];
+    if (![path isKindOfClass:[NSString class]] || ![phase isKindOfClass:[NSString class]]) return;
+    if (![path containsString:@"/attendapi/"] && ![path containsString:@"/attend/"]) return;
+    NSString *detail = [body[@"detail"] isKindOfClass:[NSString class]] ? body[@"detail"] : @"";
+    EDTAppendRequestLog([NSString stringWithFormat:@"%@ %@\n%@", phase, path, detail]);
+}
+@end
+
+static NSString *EDTWebLogScript(void) {
+    return @"(function(){"
+    "if(location.href.indexOf('kaoqindaka_wx')<0)return;"
+    "function safe(v){try{var seen=[];return JSON.stringify(v,function(k,x){"
+    "if(/token|password|passwd|secret|cookie|authorization|credential|session|mobile|phone|idcard|身份证|手机号/i.test(k))return '[已隐藏]';"
+    "if(x&&typeof x==='object'){if(seen.indexOf(x)>=0)return '[循环引用]';seen.push(x)}return x}).slice(0,1800)}catch(e){return String(v).slice(0,1800)}}"
+    "function send(phase,url,data){try{var path=String(url||'').split('?')[0];"
+    "if(path.indexOf('/attendapi/')<0&&path.indexOf('/attend/')<0)return;"
+    "window.webkit.messageHandlers.edtProbeLog.postMessage({phase:phase,path:path,detail:safe(data)})}catch(e){}}"
+    "function wrapMip(){var vm=document.querySelector('#app');vm=vm&&vm.__vue__;"
+    "var mip=vm&&vm.$mipjs;if(!mip||mip.__edtLogged)return false;"
+    "['post','get','postFORM','getFORM'].forEach(function(name){var orig=mip[name];if(typeof orig!=='function')return;"
+    "mip[name]=function(){var url=arguments[0],data=arguments[1];send('请求 '+name.toUpperCase(),url,data);"
+    "try{var ret=orig.apply(this,arguments);if(ret&&typeof ret.then==='function')ret.then(function(x){send('响应',url,x)},function(e){send('失败',url,e)});return ret}"
+    "catch(e){send('异常',url,e);throw e}}});mip.__edtLogged=true;return true}"
+    "function wrapUni(){if(!window.uni||typeof uni.request!=='function'||uni.request.__edtLogged)return false;"
+    "var orig=uni.request;uni.request=function(o){if(!o||typeof o!=='object')return orig.apply(this,arguments);"
+    "var url=o.url,active=!window.__edtMipLogged;"
+    "if(active)send('请求 '+String(o.method||'GET'),url,o.data);"
+    "if(typeof o.success!=='function'&&typeof o.fail!=='function'){var ret=orig.apply(this,arguments);"
+    "if(active&&ret&&typeof ret.then==='function')ret.then(function(v){send('响应',url,v&&v.data!==undefined?v.data:v)},"
+    "function(e){send('失败',url,e)});return ret}"
+    "var copy=Object.assign({},o);['success','fail'].forEach(function(key){var cb=o[key];"
+    "copy[key]=function(v){if(active)send(key==='success'?'响应':'失败',url,v&&v.data!==undefined?v.data:v);"
+    "if(typeof cb==='function')return cb.apply(this,arguments)}});return orig.call(this,copy)};"
+    "uni.request.__edtLogged=true;return true}"
+    "var tries=0,timer=setInterval(function(){wrapUni();if(wrapMip()){window.__edtMipLogged=true;clearInterval(timer)}"
+    "else if(++tries>300)clearInterval(timer)},100);"
+    "})();";
+}
+
+%hook WKWebView
+
+- (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
+    WKUserContentController *content = configuration.userContentController;
+    if (content && !objc_getAssociatedObject(content, @selector(initWithFrame:configuration:))) {
+        [content addScriptMessageHandler:[EDTWebLogHandler new] name:@"edtProbeLog"];
+        [content addUserScript:[[WKUserScript alloc] initWithSource:EDTWebLogScript()
+                                                  injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
+                                               forMainFrameOnly:YES]];
+        objc_setAssociatedObject(content, @selector(initWithFrame:configuration:), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return %orig;
+}
+
+%end
+
 %hook NRVpnTool
 
 - (BOOL)isVpnOnline {
@@ -529,10 +667,39 @@ static void EDTDeliverLocation(CLLocationManager *manager) {
 
 %hook CLLocation
 
+- (NSString *)dataSourceDescription {
+    if (EDTEnabled(@"location_override")) return @"LocationDataSourceRealWorld";
+    return %orig;
+}
+
 - (CLLocationCoordinate2D)coordinate {
     CLLocationCoordinate2D coordinate;
     if (EDTTestCoordinate(&coordinate)) return coordinate;
     return %orig;
+}
+
+%end
+
+%hook NRSpeedDKUtil
+
+- (int)isVirtual {
+    return EDTEnabled(@"location_override") ? 0 : %orig;
+}
+
+- (void)setIsVirtual:(int)value {
+    %orig(EDTEnabled(@"location_override") ? 0 : value);
+}
+
+%end
+
+%hook NRSpeedSignUtil
+
+- (int)isVirtual {
+    return EDTEnabled(@"location_override") ? 0 : %orig;
+}
+
+- (void)setIsVirtual:(int)value {
+    %orig(EDTEnabled(@"location_override") ? 0 : value);
 }
 
 %end

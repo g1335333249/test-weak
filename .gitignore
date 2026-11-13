@@ -3,3 +3,7 @@ packages/
 *.deb
 *.ipa
 Payload/
+kaoqindaka_wx.zip
+kaoqindaka_wx/
+dist/
+.DS_Store
