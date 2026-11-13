@@ -22,7 +22,7 @@
 
 面板底部有考勤小程序请求日志。它在加载 `kaoqindaka_wx` 的 WebView 中观察 `$mipjs` 的 `post/get` 请求与 Promise 结果，未能找到该对象时回退观察 `uni.request`。仅保留最近 60 条，每条最多约 2 KB；URL 查询参数不显示，常见令牌和口令字段会隐藏。日志仅保存在当前应用进程内，重启或点“清空日志”后消失。复制日志前仍需检查是否包含业务数据。若请求由非 WebView 的原生网络模块发送、页面结构改变，或应答在日志层仍是密文，面板可能无法显示完整内容。
 
-`kaoqindaka_wx.zip` 原位于 IPA 的 `Payload/App.app/kaoqindaka_wx.zip`，已复制到本地工程目录供检查；它属于应用资源，已加入 `.gitignore`，不会随 tweak 源码推送。包内 `static/locationhandler.js` 在前端根据 `lat`、`lng` 与基准位置计算签到范围；`static/js/index.*.js` 包含 `/attendapi/attend/sign`、`sign_with_note` 等接口路径。
+`kaoqindaka_wx.zip` 原位于 IPA 的 `Payload/App.app/kaoqindaka_wx.zip`，已复制到本地工程目录，并解压为 `kaoqindaka_wx/` 供检查；两者都是应用资源，已加入 `.gitignore`，不会随 tweak 源码推送。包内 `static/locationhandler.js` 在前端根据 `lat`、`lng` 与基准位置计算签到范围；`static/js/index.*.js` 包含 `/attendapi/attend/sign`、`sign_with_note` 等接口路径。签到页面还会将定位回调的 `mock` 或错误码 `111` 记为 `virtual=1`，并随签到请求发送；目前这些 WebView 回调值只供日志观察，尚需在真机核实其原生来源。
 
 ## 旧设备 ID 与 IDFV 从哪里来
 
