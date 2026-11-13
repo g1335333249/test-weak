@@ -15,7 +15,7 @@
 
 ## 构建与测试
 
-将本工程推到 GitHub 后，在 Actions 手动运行 **Build EDT Probe**；也可以推送受监控的文件触发构建。从运行结果下载 `edt-probe-rootless` 包，在已安装兼容注入环境的 rootless 越狱测试设备上安装。工作流使用 macOS runner 和 [Theos 官方安装脚本](https://theos.dev/docs/installation-macos)，并运行 `make clean package FINALPACKAGE=1`。
+在 Actions 手动运行 **Build EDT Probe**，也可以推送受监控的文件触发构建。从运行结果下载 `edt-probe-rootless` 包，在已安装兼容注入环境的 rootless 越狱测试设备上安装。工作流使用 macOS runner、自带的 iPhoneOS SDK 和 Theos 源码，并运行 `make clean package FINALPACKAGE=1`。
 
 注入后直接在悬浮面板中逐项配置。保存后重新发起登录或定位测试；定位 SDK 若已经初始化并缓存了检测状态，可能需要重启应用再测。通过系统日志搜索 `[EDTProbe]`，确认 tweak 已加载且目标方法被调用。
 
