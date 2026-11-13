@@ -2,6 +2,8 @@
 
 目标 IPA：`服务e点通.ipa`（`com.nari.digitalAttendance`，iOS 15+，ARM64）。工程使用 Theos Logos，生成 rootless jailbreak 的 `.deb` 包。IPA 中的主程序 `cryptid=0`，因此可以检查 Objective-C 元数据；这里没有设备或服务端测试结果。
 
+注入过滤不依赖 bundle ID：`EDTProbe.plist` 按 `NRXinTongLoginVC` 类匹配进程，tweak 初始化时再确认 `NRVpnTool` 也存在。因此同一应用重签后即使 bundle ID 改变，只要这些类名保持不变，仍可尝试注入。它不是对任意 iOS 应用通用；应用更新若重命名或移除这些类，需要重新分析并调整过滤条件。
+
 ## 已写入的测试点
 
 | 开关 | 行为 | 静态依据 |

@@ -1,5 +1,5 @@
 {
     Filter = {
-        Bundles = ("com.nari.digitalAttendance");
+        Classes = ("NRXinTongLoginVC");
     };
 }

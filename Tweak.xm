@@ -648,6 +648,8 @@ static void EDTDeliverLocation(CLLocationManager *manager) {
 
 %ctor {
     @autoreleasepool {
+        // Bundle IDs may change after re-signing; activate only in the target app.
+        if (!NSClassFromString(@"NRXinTongLoginVC") || !NSClassFromString(@"NRVpnTool")) return;
         gPrefs = [NSDictionary dictionaryWithContentsOfFile:EDTPrefsPath()] ?: @{};
         NSLog(@"[EDTProbe] loaded settings: vpn=%d location=%d device=%d idfv=%d",
               EDTEnabled(@"vpn_override"), EDTEnabled(@"location_override"),
