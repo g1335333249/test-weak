@@ -17,6 +17,15 @@
 
 两个设备标识输入框下方显示“原始”和“返回”值，可点“刷新当前读取值”重新读取。这里显示的是对应系统 API 的返回结果；应用若另用 Keychain、SDK 或服务端数据生成设备指纹，仍需结合登录请求确认。设置保存在应用自己的容器中，开关默认关闭。设备标识开关只有填写非空旧设备 ID 才生效；IDFV 开关只有填写有效 UUID 才生效。不要将真实旧设备 ID 提交到仓库。`settings.example.plist` 仅展示配置格式，不需要手动复制。
 
+## 旧设备 ID 与 IDFV 从哪里来
+
+| 面板字段 | “原始”值的读取方式 | 替换值如何取得 |
+| --- | --- | --- |
+| 旧设备 ID | 点击“刷新当前读取值”时，从**当前这台设备**的应用 `NSUserDefaults.standardUserDefaults` 读取键 `E_DIAN_TONG_DEVICE_ID`；hook 也记录应用通过 `objectForKey:` 或 `stringForKey:` 读取此键时的原值 | 在**已获准登录的旧设备**上安装同一测试 tweak，关闭“旧设备 ID 替换”，打开面板读取“原始”值，再手动填入新设备的输入框。若旧设备已无法读取，可从你控制的设备注册服务端或原应用数据中核对该 ID |
+| IDFV | 调用**当前这台设备**的 `UIDevice.currentDevice.identifierForVendor`，记录改写前返回的 UUID | 在已获准登录的旧设备上用相同方式读取“原始” IDFV，再手动填入新设备 |
+
+“返回”显示开关和输入值生效后，当前 API 调用返回给应用的值。新设备面板无法凭空获取旧设备的值；旧设备 ID 显示“（空）”只表示当前读取的 `NSUserDefaults` 键没有值，不代表应用没有使用其他存储或服务端设备标识。IDFV 是 iOS 的供应商标识，和应用自定义的 `E_DIAN_TONG_DEVICE_ID` 不是同一字段。即使两项“返回”与输入值一致，也只能说明这些 hook 路径改写成功，不能据此判定服务端设备绑定已被绕过。
+
 ## 构建与测试
 
 在 Actions 手动运行 **Build EDT Probe**，也可以推送受监控的文件触发构建。从运行结果下载 `edt-probe-rootless` 包，在已安装兼容注入环境的 rootless 越狱测试设备上安装。工作流使用 macOS runner、自带的 iPhoneOS SDK 和 Theos 源码，并运行 `make clean package FINALPACKAGE=1`。
