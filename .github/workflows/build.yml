@@ -24,9 +24,24 @@ jobs:
         run: |
           export THEOS="$HOME/theos"
           make clean package FINALPACKAGE=1
+      - name: Prepare standalone dylib
+        run: |
+          mkdir -p artifacts/dylib
+          staged_dylib="$(find .theos/_ -type f -name EDTProbe.dylib -print -quit)"
+          staged_filter="$(find .theos/_ -type f -name EDTProbe.plist -print -quit)"
+          test -n "$staged_dylib" && test -n "$staged_filter"
+          cp "$staged_dylib" artifacts/dylib/EDTProbe.dylib
+          cp "$staged_filter" artifacts/dylib/EDTProbe.plist
+          test -s artifacts/dylib/EDTProbe.dylib
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: edt-probe-rootless
           path: packages/*.deb
+          if-no-files-found: error
+      - name: Upload dylib and injection filter
+        uses: actions/upload-artifact@v4
+        with:
+          name: edt-probe-dylib
+          path: artifacts/dylib/*
           if-no-files-found: error
