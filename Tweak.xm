@@ -6,6 +6,10 @@
 #import <objc/runtime.h>
 #import <math.h>
 
+@interface NSString (EDTLoginDeviceID)
++ (NSString *)getFCUUID;
+@end
+
 // The target IPA is version 3.3.3, bundle com.nari.digitalAttendance.
 // Settings are edited in the injected overlay and take effect immediately.
 static NSDictionary *gPrefs;
@@ -15,6 +19,8 @@ static NSString *gRawDeviceID;
 static NSString *gReturnedDeviceID;
 static NSString *gRawIDFV;
 static NSString *gReturnedIDFV;
+static NSString *gRawLoginDeviceID;
+static NSString *gReturnedLoginDeviceID;
 static NSMutableArray<NSString *> *gRequestLog;
 static NSString *const EDTLogChanged = @"EDTProbeLogChanged";
 
@@ -353,10 +359,13 @@ static void EDTRecordIDFV(NSUUID *original, NSUUID *returned) {
     // Reading through the public APIs exercises the same hook path as the app.
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     (void)[defaults objectForKey:EDTCurrentDeviceIDKey(defaults)];
+    if ([NSString respondsToSelector:@selector(getFCUUID)]) {
+        (void)[NSString getFCUUID];
+    }
     (void)[[UIDevice currentDevice] identifierForVendor];
     @synchronized ([NSUserDefaults class]) {
-        self.deviceRawLabel.text = [@"原始：" stringByAppendingString:gRawDeviceID ?: @"（未读取）"];
-        self.deviceReturnedLabel.text = [@"返回：" stringByAppendingString:gReturnedDeviceID ?: @"（未读取）"];
+        self.deviceRawLabel.text = [@"登录原始：" stringByAppendingString:gRawLoginDeviceID ?: gRawDeviceID ?: @"（未读取）"];
+        self.deviceReturnedLabel.text = [@"登录返回：" stringByAppendingString:gReturnedLoginDeviceID ?: gReturnedDeviceID ?: @"（未读取）"];
         self.idfvRawLabel.text = [@"原始：" stringByAppendingString:gRawIDFV ?: @"（未读取）"];
         self.idfvReturnedLabel.text = [@"返回：" stringByAppendingString:gReturnedIDFV ?: @"（未读取）"];
     }
@@ -758,6 +767,22 @@ static void EDTDeliverLocation(CLLocationManager *manager) {
         return;
     }
     %orig;
+}
+
+%end
+
+%hook NSString
+
++ (NSString *)getFCUUID {
+    NSString *original = %orig;
+    NSString *oldID = EDTEnabled(@"device_id_override") ? EDTOldDeviceID() : nil;
+    NSString *returned = oldID ?: original;
+    @synchronized ([NSUserDefaults class]) {
+        gRawLoginDeviceID = EDTDisplayValue(original);
+        gReturnedLoginDeviceID = EDTDisplayValue(returned);
+    }
+    if (oldID) NSLog(@"[EDTProbe] supplied configured getFCUUID for login and device update");
+    return returned;
 }
 
 %end

@@ -12,13 +12,13 @@
 | `location_override` | 将 `CLLocationSourceInformation -isSimulatedBySoftware` 返回 `NO`，把 `CLLocation -dataSourceDescription` 设为 `LocationDataSourceRealWorld`，把 `NRSpeedDKUtil`/`NRSpeedSignUtil` 的 `isVirtual` 置 0，并关闭两个高德定位管理器的 `detectRiskOfFakeLocation` | 主程序含这些 selector 与属性；此处覆盖本地识别与请求参数路径 |
 | `custom_location_enabled` | 在定位开关打开且经纬度有效时，让 `CLLocation -coordinate` 返回指定坐标 | 用于验证应用是否直接读取 Core Location 坐标 |
 | `direct_location_delivery` | 在上述条件下拦截 `CLLocationManager -requestLocation` 和 `-startUpdatingLocation`，直接向 delegate 回传测试位置 | 用于验证是否可跳过系统定位请求；尚未验证应用全部路径 |
-| `device_id_override` | 对 `NSUserDefaults` 读取 `E_DIAN_TONG_DEVICE_ID` 及带账号后缀的同名前缀键时返回配置的旧设备 ID，并保留原值的字符串或 `NSData` 类型 | 实际安装数据中发现带后缀的键与 UTF-8 `NSData` 值；尚未确认登录请求一定从这里读取 |
-| `idfv_override` | 用配置的 UUID 替换 `UIDevice -identifierForVendor` | 用于排查另一种设备标识路径，尚未确认应用使用它 |
+| `device_id_override` | 改写登录和设备更新请求调用的 `NSString +getFCUUID`，并兼容 `NSUserDefaults` 读取 `E_DIAN_TONG_DEVICE_ID` 及带账号后缀的键 | `NRNoTrustTool -loginNotrust:andPwd:handleLoginBlock:`、`NRXinTongLoginVC -updateUserDevice` 均调用 `getFCUUID` |
+| `idfv_override` | 用配置的 UUID 替换 `UIDevice -identifierForVendor` | `getFCUUID` 优先取 `FCUUID uuidForDevice`；仅改 IDFV 通常无法改变登录用的标识 |
 | `network_log_enabled` | 在面板展示考勤小程序 `/attendapi/` 和 `/attend/` 请求及响应；默认开启 | `kaoqindaka_wx.zip` 内的前端调用 `$mipjs.post/get` 访问这些路径 |
 
 注入后，应用右侧会出现可拖动的“测试”悬浮按钮。点开后可设置 VPN、定位和设备标识开关；点面板标题即可折叠。定位区可输入经纬度，或打开地图轻点选点并确认。打开“虚拟定位检测改写”和“使用指定经纬度”后，坐标改写才生效；再打开“直接返回测试位置”，可测试跳过 Core Location 的系统请求。地图选点使用 MapKit，需有地图数据网络连接，坐标以地图返回值为准。
 
-两个设备标识输入框下方显示“原始”和“返回”值，可点“刷新当前读取值”重新读取。这里显示的是对应系统 API 的返回结果；应用若另用 Keychain、SDK 或服务端数据生成设备指纹，仍需结合登录请求确认。设置保存在应用自己的容器中，开关默认关闭。设备标识开关只有填写非空旧设备 ID 才生效；IDFV 开关只有填写有效 UUID 才生效。不要将真实旧设备 ID 提交到仓库。`settings.example.plist` 仅展示配置格式，不需要手动复制。
+两个设备标识输入框下方显示“原始”和“返回”值，可点“刷新当前读取值”重新读取。旧设备 ID 栏现在优先显示登录流程 `getFCUUID` 的实际值；其格式为 `UID_` 加去掉连字符的 UUID。设置保存在应用自己的容器中，开关默认关闭。设备标识开关只有填写非空旧设备 ID 才生效；IDFV 开关只有填写有效 UUID 才生效。不要将真实旧设备 ID 提交到仓库。`settings.example.plist` 仅展示配置格式，不需要手动复制。
 
 面板底部有考勤小程序请求日志。它在加载 `kaoqindaka_wx` 的 WebView 中观察 `$mipjs` 的 `post/get` 请求与 Promise 结果，未能找到该对象时回退观察 `uni.request`。仅保留最近 60 条，每条最多约 2 KB；URL 查询参数不显示，常见令牌和口令字段会隐藏。日志仅保存在当前应用进程内，重启或点“清空日志”后消失。复制日志前仍需检查是否包含业务数据。若请求由非 WebView 的原生网络模块发送、页面结构改变，或应答在日志层仍是密文，面板可能无法显示完整内容。
 
@@ -28,12 +28,18 @@
 
 | 面板字段 | “原始”值的读取方式 | 替换值如何取得 |
 | --- | --- | --- |
-| 旧设备 ID | 点击“刷新当前读取值”时，从**当前这台设备**的应用 `NSUserDefaults.standardUserDefaults` 读取 `E_DIAN_TONG_DEVICE_ID` 或其带账号后缀的键；实际样本中值为 UTF-8 编码的 `NSData`，面板会解码显示。hook 也记录应用通过 `objectForKey:` 或 `stringForKey:` 读取同一键时的原值 | 在**已获准登录的旧设备**上安装同一测试 tweak，关闭“旧设备 ID 替换”，打开面板读取“原始”值，再手动填入新设备的输入框。若旧设备已无法读取，可从你控制的设备注册服务端或原应用数据中核对该 ID |
+| 旧设备 ID | 点击“刷新当前读取值”时调用**当前这台设备**的 `NSString +getFCUUID`，显示登录请求实际采用的值；该方法先试 `FCUUID uuidForDevice`，再依次尝试 vendor、installation、session UUID 与随机 UUID，然后加 `UID_` 并去掉连字符。读取 `NSUserDefaults` 的旧键仍被兼容，但不作为登录值的主要展示来源 | 在**已获准登录的旧设备**上安装同一测试 tweak，关闭“旧设备 ID 替换”，打开面板读取“登录原始”值，再填入新设备。若旧设备已无法读取，可从你控制的设备注册服务端或原应用数据中核对该 ID |
 | IDFV | 调用**当前这台设备**的 `UIDevice.currentDevice.identifierForVendor`，记录改写前返回的 UUID | 在已获准登录的旧设备上用相同方式读取“原始” IDFV，再手动填入新设备 |
 
-“返回”显示开关和输入值生效后，当前 API 调用返回给应用的值。新设备面板无法凭空获取旧设备的值；旧设备 ID 显示“（空）”只表示当前读取的 `NSUserDefaults` 键没有值，不代表应用没有使用其他存储或服务端设备标识。IDFV 是 iOS 的供应商标识，和应用自定义的 `E_DIAN_TONG_DEVICE_ID` 不是同一字段。即使两项“返回”与输入值一致，也只能说明这些 hook 路径改写成功，不能据此判定服务端设备绑定已被绕过。
+“返回”显示开关和输入值生效后，当前 API 调用返回给应用的值。新设备面板无法凭空获取旧设备的值。IDFV 是 iOS 的供应商标识，和 `getFCUUID` 的最终字符串不是同一字段。即使“登录返回”与输入值一致，也只能说明客户端调用点被改写，不能据此判定服务端设备绑定已被绕过。
 
 已安装数据样本还含有带相同账号后缀的 `E_DIAN_TONG_LOGIN_INFO`，其 JSON 中有 `deviceId` 字段；样本里它与单独保存的设备 ID 相同。当前 tweak 未改写这份登录缓存，测试登录时需检查应用实际使用的字段。
+
+## 新终端禁止登录的静态判断链
+
+登录按钮先调用 `NRNoTrustTool -loginNotrust:andPwd:handleLoginBlock:`。它构造传给 `EnSDK_loginWithUsername:password:userType:extra:loginBlock:` 的 `deviceInfo`，包括 `deviceId`（`NSString +getFCUUID`）、`deviceModel`、`platformType`、`osVersion`、用户名、版本号等。`NRNoTrustTool` 从登录错误响应中解析 `code`、`messages`，遇到 SDK 的二次认证码时转为客户端 `code=2`；登录页依据结果显示消息或进入验证码流程。成功后，登录页把同一个 `getFCUUID` 值写入 `E_DIAN_TONG_LOGIN_INFO.deviceId`。面容验证成功的分支随后调用 `/manage/user/api/user/mobile/updateDevice`，提交 `userUuid`、`deviceId`、设备型号、平台和系统版本。
+
+IPA 中未找到“新终端设备，禁止登录”的固定文案，也未找到把旧 ID 与当前 ID 在客户端直接比较并拒绝登录的分支。因此该提示很可能来自登录服务返回的 `messages`，但具体服务端规则、错误码和是否允许更换设备需要用真机请求或服务端日志确认。`updateDevice` 发生在后续流程，不能仅凭方法名认定它负责首次登录拦截。
 
 ## 构建与测试
 
