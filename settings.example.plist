@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>vpn_override</key><false/>
+    <key>vpn_mode</key><string>online</string>
+    <key>location_override</key><false/>
+    <key>device_id_override</key><false/>
+    <key>authorized_device_id</key><string></string>
+    <key>idfv_override</key><false/>
+    <key>authorized_idfv</key><string></string>
+</dict>
+</plist>

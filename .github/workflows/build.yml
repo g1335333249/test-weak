@@ -1,0 +1,29 @@
+name: Build EDT Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Makefile'
+      - 'Tweak.xm'
+      - 'control'
+      - 'EDTProbe.plist'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Theos
+        run: bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+      - name: Build rootless package
+        run: |
+          export THEOS="$HOME/theos"
+          make clean package FINALPACKAGE=1
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: edt-probe-rootless
+          path: packages/*.deb
+          if-no-files-found: error

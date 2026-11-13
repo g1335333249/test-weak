@@ -1,0 +1,8 @@
+Package: com.testipa.edtprobe
+Name: EDT Probe
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Switchable local security-check probes for com.nari.digitalAttendance
+Maintainer: App Security Test
+Author: App Security Test
+Section: Tweaks
